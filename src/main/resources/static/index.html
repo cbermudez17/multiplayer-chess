@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Chess</title>
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css" />
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css">
+    <link rel="stylesheet" href="./css/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:400,600,700,300">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"></script>
+    <script src="./js/chessboard-1.0.0.min.js"></script>
+    <script src="./js/chess.min.js"></script>
+    <script type="text/javascript">
+	"use strict";
+
+	var username;
+	while ((username = prompt("Please enter your name")) == '' || username == null) {}
+
+    var pieceColors = {b: 'black', w: 'white'};
+	var Chat = {};
+	Chat.socket = null;
+	Chat.connect = function(host) {
+		if ('WebSocket' in window) {
+	        Chat.socket = new WebSocket(host);
+	    } else if ('MozWebSocket' in window) {
+	        Chat.socket = new MozWebSocket(host);
+	    } else {
+	        Chat.log(JSON.stringify({"sender":"","message":"WebSocket is not supported by this browser"}));
+	        return;
+        }
+
+	    Chat.socket.onopen = function() {
+            Chat.log(JSON.stringify({"sender":"","message":"WebSocket connection opened"}));
+	        $(window).on('keydown', function(event) {
+                if (event.which == 13) {
+                    Chat.sendMessage();
+	    			return false;
+	    		}
+	    	});
+	        $('#submit-btn').click(function() {
+                Chat.sendMessage();
+	    	});
+            $('#move-btn').click(function() {
+                if (!hasMoved) {
+                    return;
+                }
+                var obj = {
+                    type: "game",
+                    message: {fen: game.fen(), last: Board.last}
+                };
+                Chat.socket.send(JSON.stringify(obj));
+                $('#move-btn').html('Move Sent');
+                $('#move-btn').prop('disabled', true);
+                $('#msg').html('Waiting for your opponent');
+                $('#undo-btn').hide();
+                highlightLastMove(Board.last.color, Board.last.to, Board.last.from);
+            });
+            $('#undo-btn').click(function() {
+                removeRedSquare();
+                game.undo();
+                board1.position(game.fen());
+                hasMoved = false;
+                if (game.in_check()) {
+                    redSquare(game.turn());
+                }
+            });
+		    Chat.socket.send(JSON.stringify({type:"init",name:username}));
+	    };
+
+	    Chat.socket.onclose = function() {
+	        window.onkeydown = null;
+            document.getElementById('submit-btn').onclick = null;
+            document.getElementById('move-btn').onclick = null;
+	        Chat.log(JSON.stringify({"sender":"","message":"WebSocket closed"}));
+	    };
+
+	    Chat.socket.onmessage = function(message) {
+            var obj = JSON.parse(message.data);
+            if (obj.type == 'game') {
+                Board.move(obj.message);
+            } else {
+                Chat.log(message.data);
+            }
+	    };
+	};
+
+	Chat.initialize = function() {
+	    if (window.location.protocol == 'http:') {
+	        Chat.connect('ws://74.105.116.178:8080/user');
+	    } else {
+	        Chat.connect('wss://74.105.116.178:8080/user');
+	    }
+	};
+
+	Chat.sendMessage = function() {
+	    var message = $(".message-input input").val();
+		if ($.trim(message) != '') {
+			var obj = {
+                type: "chat",
+                sender : username,
+                message
+			};
+			Chat.socket.send(JSON.stringify(obj));
+			$('.message-input input').val('');
+		}
+	};
+
+	Chat.log = function(data) {
+		var obj = JSON.parse(data);
+		var className = (obj.sender == '') ? 'text-center' : (obj.sender == username) ? 'sent' : 'replies';
+
+		$('<li class="' + className + '"><p>' + obj.message + '</p></li>').appendTo($('.messages ul'));
+		$(".messages").animate({
+			scrollTop : $(".messages").prop("scrollHeight")
+        }, "fast");
+    };
+
+    var Board = {last: null};
+
+    Board.move = function(move) {
+        var position = move.fen;
+        board1.position(position);
+        game.load(position);
+        if (game.turn() != board1.orientation()[0]) {
+            board1.orientation('flip');
+        }
+        removeRedSquare();
+        if (move.hasOwnProperty('last')) {
+            highlightLastMove(move.last.color, move.last.from, move.last.to);
+        }
+        if (game.game_over()) {
+            if (game.in_checkmate()) {
+                $('#msg').html('You lose!');
+                // Highlight own king in red
+                redSquare(game.turn());
+            } else if (game.in_stalemate()) {
+                $('#msg').html('Stalemate!');
+            } else if (game.in_draw()) {
+                $('#msg').html('Draw!');
+            }
+        } else {
+            if (game.in_check()) {
+                // Highlight own king in red
+                redSquare(game.turn());
+            }
+            hasMoved = false;
+            $('#msg').html('Your turn');
+            $('#move-btn').html('Confirm Move');
+            $('#move-btn').prop('disabled', false);
+            $('#undo-btn').show();
+        }
+    };
+
+	Chat.initialize();
+</script>
+    <style>
+body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 100vh;
+	background-color: #27ae60;
+	font-family: "proxima-nova", "Source Sans Pro", sans-serif;
+	font-size: 1em;
+	letter-spacing: 0.1px;
+	color: #fff;
+	text-rendering: optimizeLegibility;
+	text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.004);
+	-webkit-font-smoothing: antialiased;
+}
+
+.chat {
+	min-width: 360px;
+	max-width: 500px;
+	height: 92vh;
+	min-height: 300px;
+	max-height: 600px;
+    color: #000;
+	background-color: #fefefe;
+}
+
+.content {
+	height: 100%;
+	overflow: hidden;
+	position: relative;
+}
+
+.messages {
+	height: 100%;
+	width: 100%;
+	overflow-y: scroll;
+	overflow-x: hidden;
+}
+
+.messages::-webkit-scrollbar {
+	width: 8px;
+	background-color: transparent;
+}
+
+.messages::-webkit-scrollbar-thumb {
+	background-color: rgba(0, 0, 0, 0.3);
+}
+
+.messages ul {
+	padding: 0 20px;
+    margin: 0;
+}
+
+.messages li {
+	display: inline-block;
+	clear: both;
+	width: 100%;
+	font-size: 0.9em;
+	padding: 0;
+}
+
+.messages li:nth-last-child(1) {
+	margin-bottom: 55px;
+}
+
+.messages li.sent p {
+	background-color: #1085fd;
+	color: #f5f5f5;
+	float: right;
+}
+
+.messages li.replies p {
+	background-color: #e9e8eb;
+	float: left;
+}
+
+.messages li p {
+	display: inline-block;
+	padding: 10px 15px;
+	margin-bottom: 0;
+	border-radius: 15px;
+	max-width: 300px;
+	line-height: 130%;
+}
+
+.message-input {
+	position: absolute;
+	bottom: 0;
+	width: 100%;
+	z-index: 99;
+	background-color: white;
+}
+
+.message-input .wrap {
+	position: relative;
+    border-radius: 15px;
+    border: 2px #e9e8eb solid;
+    margin: 5px;
+}
+
+.message-input .wrap input {
+	font-family: "proxima-nova", "Source Sans Pro", sans-serif;
+	float: left;
+	border: none;
+	width: calc(100% - 90px);
+	padding: 11px 32px 10px 15px;
+	font-size: 0.8em;
+	color: #000;
+}
+
+.message-input .wrap input:focus {
+	outline: none;
+}
+
+.message-input .wrap button {
+	float: right;
+	cursor: pointer;
+	color: #1085fd;
+}
+
+.message-input .wrap button:hover {
+	color: #0f6fd0;
+}
+
+.message-input .wrap button:focus {
+	outline: none;
+}
+
+.highlight-white {
+  box-shadow: inset 0 0 3px 3px yellow;
+}
+
+.highlight-black {
+  box-shadow: inset 0 0 3px 3px blue;
+}
+
+.highlight-red {
+  box-shadow: inset 0 0 3px 3px red;
+}
+</style>
+</head>
+
+<body>
+<div class="container row px-0 py-5">
+    <div class="chat col-12 col-md-6 order-md-2 p-0">
+        <div class="content">
+            <div class="messages">
+                <ul></ul>
+            </div>
+            <div class="message-input">
+                <div class="wrap clearfix">
+                    <input type="text" placeholder="Write your message..." />
+                    <button id="submit-btn" class="btn" type="button">
+                        <i class="fas fa-arrow-circle-up" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="chess col-12 col-md-6 order-md-1">
+        <h2 class="m-3" id="msg">Welcome to Chess</h2>
+        <div id="board1"></div>
+        <button id="undo-btn" type="button" class="btn btn-primary my-3 mr-3">Undo</button>
+        <button id="move-btn" type="button" class="btn btn-primary my-3">Confirm Move</button>
+    </div>
+</div>
+
+<script>
+        var board1 = null;
+        var hasMoved = false;
+        var game = new Chess();
+        var whiteSquareGrey = '#a9a9a9';
+        var blackSquareGrey = '#696969';
+
+        function getKingSquare(color) { // Color is 'w' or 'b'
+            return [...game.board()].flat()
+                .map((p, idx) => (p !== null && p.type === 'k' && p.color === color) ? idx : null)
+                .filter(Number.isInteger)
+                .map((idx) => {
+                    const row = 'abcdefgh'[idx % 8]
+                    const column = Math.ceil((64 - idx) / 8)
+                    return row + column
+                })[0];
+        }
+
+        function highlightLastMove(color, ...squares) {
+            $('#board1 .square-55d63').removeClass('highlight-white');
+            $('#board1 .square-55d63').removeClass('highlight-black');
+            squares.forEach(square =>
+                $('#board1 .square-' + square).addClass('highlight-' + color)
+            );
+        }
+
+        function redSquare(kingColor) {
+            removeRedSquare();
+            var square = getKingSquare(kingColor);
+            $('#board1 .square-' + square).addClass('highlight-red');
+        }
+
+        function removeRedSquare() {
+            $('#board1 .square-55d63').removeClass('highlight-red');
+        }
+
+        function removeGreySquares() {
+            $('#board1 .square-55d63').css('background', '');
+        }
+
+        function greySquare(square) {
+            var $square = $('#board1 .square-' + square);
+            $square.css('background', $square.hasClass('black-3c85d') ? blackSquareGrey : whiteSquareGrey);
+        }
+
+        function onDragStart(source, piece) {
+            if (hasMoved) {
+                return false;
+            }
+            // do not pick up pieces if the game is over
+            if (game.game_over()) {
+                return false;
+            }
+
+            // or if it's not that side's turn
+            if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+        }
+
+        function onDrop(source, target) {
+            removeGreySquares()
+            removeRedSquare();
+
+            // see if the move is legal
+            var move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // NOTE: always promote to a queen for example simplicity
+            });
+
+            // illegal move
+            if (move === null) {
+                return 'snapback';
+            }
+
+            Board.last = {
+                color: pieceColors[move.color],
+                from: source,
+                to: target
+            };
+            hasMoved = true;
+            if (move.san.includes("O-O")) {
+                if (target == 'c8') {
+                    board1.move('a8-d8');
+                } else if (target == 'g8') {
+                    board1.move('h8-f8');
+                } else if (target == 'g1') {
+                    board1.move('h1-f1');
+                } else {
+                    board1.move('a1-d1');
+                }
+            }
+            // else if (move.hasOwnProperty("promotion")) {
+            //     var pos = Chessboard.fenToObj(game.fen());
+            //     pos[target] = move.color + 'Q';
+            //     board1.position(pos, false);
+            // }
+
+            if (game.in_checkmate()) {
+                $('#msg').html('You win!');
+                // Highlight opposite king in red
+                redSquare(game.turn());
+                // Send game over message
+                $('#move-btn').trigger('click');
+                $('#msg').html('You win!');
+            } else if (game.in_check()) {
+                // Highlight opposite king in red
+                redSquare(game.turn());
+            } else if (game.in_stalemate()) {
+                $('#msg').html('Stalemate!');
+            } else if (game.in_draw()) {
+                $('#msg').html('Draw!');
+            }
+        }
+
+        function onMouseoverSquare(square, piece) {
+            if (hasMoved) {
+                return;
+            }
+
+            // get list of possible moves for this square
+            var moves = game.moves({
+                square: square,
+                verbose: true
+            });
+
+            // exit if there are no moves available for this square
+            if (moves.length === 0) {
+                return;
+            }
+
+            // highlight the square they moused over
+            greySquare(square);
+
+            // highlight the possible squares for this piece
+            for (var i = 0; i < moves.length; i++) {
+                greySquare(moves[i].to)
+            }
+        }
+
+        function onMouseoutSquare(square, piece) {
+            removeGreySquares();
+        }
+
+        var config = {
+            draggable: true,
+            position: 'start',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onMouseoutSquare: onMouseoutSquare,
+            onMouseoverSquare: onMouseoverSquare,
+        }
+
+        board1 = Chessboard('board1', config);
+        window.addEventListener('resize', () => board1.resize());
+    </script>
+
+</body>
+
+</html>
