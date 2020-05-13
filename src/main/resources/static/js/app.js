@@ -72,12 +72,7 @@ Chat.connect = function (host) {
 };
 
 Chat.initialize = function () {
-    // GAR
-    // var ipAddress = '74.105.116.178:8080';
-    // FL
-    // var ipAddress = '24.190.49.248:8080';
-    // DEV
-    var ipAddress = 'localhost:8080';
+    var ipAddress = '24.190.49.248:8080';
     if (window.location.protocol == 'http:') {
         Chat.connect('ws://' + ipAddress + '/user');
     } else {
