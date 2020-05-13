@@ -5,10 +5,8 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.Map.Entry;
 
 public class ChessSession {
     private Map<WebSocketSession, String> playerSessions = new HashMap<>();
@@ -35,14 +33,18 @@ public class ChessSession {
         }
     }
 
-    private void removePlayer(WebSocketSession session) throws Exception {
+    private void removePlayer(Entry<WebSocketSession, String> entry, Iterator<Entry<WebSocketSession, String>> iterator)
+            throws IOException {
+        WebSocketSession session = entry.getKey();
+        String name = entry.getValue();
+
         // Close the WebSocketSession
         session.close();
 
         // Check if there remains another player
         if (this.isFull) {
             // Remove the player from the ChessSession
-            String name = this.playerSessions.remove(session);
+            iterator.remove();
             this.isFull = false;
 
             // Send a disconnect message to the remaining player
@@ -54,16 +56,19 @@ public class ChessSession {
     }
 
     public void sendMove(WebSocketSession fromSession, String move) {
-        for (WebSocketSession session : this.playerSessions.keySet()) {
+        Iterator<Entry<WebSocketSession, String>> iterator = this.playerSessions.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Entry<WebSocketSession, String> entry = iterator.next();
+            WebSocketSession session = entry.getKey();
             if (session == fromSession) {
                 continue;
             }
             try {
                 sendMessage(session, move);
-            } catch (IOException e) {
+            } catch (IOException | IllegalStateException e) {
                 try {
                     // If message fails, remove the player from the session
-                    removePlayer(session);
+                    removePlayer(entry, iterator);
                 } catch (Exception e1) {}
             }
         }
@@ -75,13 +80,18 @@ public class ChessSession {
 
         // Send the message to every player
         TextMessage textMessage = new TextMessage(message);
-        for (WebSocketSession session : this.playerSessions.keySet()) {
+
+        // Using an iterator will prevent any ConcurrentModificationException
+        Iterator<Entry<WebSocketSession, String>> iterator = this.playerSessions.entrySet().iterator();
+        Entry<WebSocketSession, String> entry = null;
+        while (iterator.hasNext()) {
             try {
-                session.sendMessage(textMessage);
-            } catch (IOException e) {
+                entry = iterator.next();
+                entry.getKey().sendMessage(textMessage);
+            } catch (IOException | IllegalStateException e) {
                 try {
                     // If message fails, remove the player from the session
-                    removePlayer(session);
+                    removePlayer(entry, iterator);
                 } catch (Exception e1) {}
             }
         }
